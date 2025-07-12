@@ -1,164 +1,234 @@
+# -*- coding: utf-8 -*-
+"""
+数据处理工具模块
+"""
+
 import pandas as pd
 import numpy as np
-import streamlit as st
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.impute import SimpleImputer
-import io
+import streamlit as st
 
-def load_data(uploaded_file):
-    """
-    加载上传的数据文件
-    """
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        elif uploaded_file.name.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(uploaded_file)
-        else:
-            st.error("不支持的文件格式！请上传 CSV 或 Excel 文件。")
-            return None
-        
-        st.success(f"数据加载成功！数据形状: {df.shape}")
-        return df
-    except Exception as e:
-        st.error(f"数据加载失败: {str(e)}")
-        return None
+def load_data(file_path):
+  """
+  加载数据文件
+  支持CSV和Excel格式
+  """
+  try:
+      if file_path.name.endswith('.csv'):
+          data = pd.read_csv(file_path)
+      elif file_path.name.endswith(('.xlsx', '.xls')):
+          data = pd.read_excel(file_path)
+      else:
+          raise ValueError("不支持的文件格式")
+      
+      return data
+  except Exception as e:
+      st.error(f"数据加载失败: {str(e)}")
+      return None
 
-def get_data_info(df):
-    """
-    获取数据基本信息
-    """
-    info_dict = {
-        '数据形状': df.shape,
-        '列数': df.shape[1],
-        '行数': df.shape[0],
-        '缺失值总数': df.isnull().sum().sum(),
-        '数值型列': list(df.select_dtypes(include=[np.number]).columns),
-        '分类型列': list(df.select_dtypes(include=['object', 'category']).columns),
-        '重复行数': df.duplicated().sum()
-    }
-    return info_dict
+def handle_missing_values(data, strategy='mean'):
+  """
+  处理缺失值
+  
+  参数:
+  - data: pandas DataFrame
+  - strategy: 'mean', 'median', 'mode', 'drop'
+  
+  返回:
+  - 处理后的DataFrame
+  """
+  try:
+      data_copy = data.copy()
+      
+      if strategy == 'drop':
+          return data_copy.dropna()
+      
+      elif strategy == 'mean':
+          numeric_cols = data_copy.select_dtypes(include=[np.number]).columns
+          data_copy[numeric_cols] = data_copy[numeric_cols].fillna(data_copy[numeric_cols].mean())
+          
+      elif strategy == 'median':
+          numeric_cols = data_copy.select_dtypes(include=[np.number]).columns
+          data_copy[numeric_cols] = data_copy[numeric_cols].fillna(data_copy[numeric_cols].median())
+          
+      elif strategy == 'mode':
+          for col in data_copy.columns:
+              if data_copy[col].isnull().any():
+                  mode_value = data_copy[col].mode()
+                  if not mode_value.empty:
+                      data_copy[col].fillna(mode_value[0], inplace=True)
+      
+      return data_copy
+      
+  except Exception as e:
+      st.error(f"缺失值处理失败: {str(e)}")
+      return data
 
-def get_missing_info(df):
-    """
-    获取缺失值详细信息
-    """
-    missing_data = pd.DataFrame({
-        '缺失数量': df.isnull().sum(),
-        '缺失比例(%)': (df.isnull().sum() / len(df)) * 100
-    })
-    missing_data = missing_data[missing_data['缺失数量'] > 0].sort_values('缺失数量', ascending=False)
-    return missing_data
+def get_data_info(data):
+  """
+  获取数据基本信息
+  """
+  try:
+      info = {
+          'shape': data.shape,
+          'columns': list(data.columns),
+          'dtypes': data.dtypes.to_dict(),
+          'missing_values': data.isnull().sum().to_dict(),
+          'numeric_columns': list(data.select_dtypes(include=[np.number]).columns),
+          'categorical_columns': list(data.select_dtypes(include=['object']).columns)
+      }
+      return info
+  except Exception as e:
+      st.error(f"获取数据信息失败: {str(e)}")
+      return None
 
-def preprocess_data(df, target_col, task_type, test_size=0.2, handle_missing='mean', 
-                   scale_features=True, random_state=42):
-    """
-    数据预处理主函数
-    """
-    # 复制数据避免修改原始数据
-    df_processed = df.copy()
-    
-    # 分离特征和目标变量
-    if target_col not in df.columns:
-        st.error(f"目标列 '{target_col}' 不存在于数据中！")
-        return None, None, None, None
-    
-    X = df_processed.drop(columns=[target_col])
-    y = df_processed[target_col]
-    
-    # 处理分类特征
-    categorical_cols = X.select_dtypes(include=['object', 'category']).columns
-    if len(categorical_cols) > 0:
-        le_dict = {}
-        for col in categorical_cols:
-            le = LabelEncoder()
-            X[col] = le.fit_transform(X[col].astype(str))
-            le_dict[col] = le
-    
-    # 处理目标变量（如果是分类任务且目标是字符串）
-    if task_type in ['分类', '二分类', '多分类'] and y.dtype == 'object':
-        le_target = LabelEncoder()
-        y = le_target.fit_transform(y)
-    
-    # 处理缺失值
-    if handle_missing == 'mean':
-        imputer = SimpleImputer(strategy='mean')
-    elif handle_missing == 'median':
-        imputer = SimpleImputer(strategy='median')
-    elif handle_missing == 'most_frequent':
-        imputer = SimpleImputer(strategy='most_frequent')
-    else:
-        imputer = SimpleImputer(strategy='constant', fill_value=0)
-    
-    X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
-    
-    # 分割数据
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, 
-        stratify=y if task_type in ['分类', '二分类', '多分类'] else None
-    )
-    
-    # 特征缩放
-    if scale_features:
-        scaler = StandardScaler()
-        X_train = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
-        X_test = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
-    
-    return X_train, X_test, y_train, y_test
+def preprocess_data(data, numeric_strategy='mean', categorical_strategy='mode', scale_features=False):
+  """
+  数据预处理
+  """
+  try:
+      processed_data = data.copy()
+      
+      # 处理数值型缺失值
+      numeric_cols = processed_data.select_dtypes(include=[np.number]).columns
+      if len(numeric_cols) > 0:
+          if numeric_strategy == 'mean':
+              processed_data[numeric_cols] = processed_data[numeric_cols].fillna(processed_data[numeric_cols].mean())
+          elif numeric_strategy == 'median':
+              processed_data[numeric_cols] = processed_data[numeric_cols].fillna(processed_data[numeric_cols].median())
+      
+      # 处理分类型缺失值
+      categorical_cols = processed_data.select_dtypes(include=['object']).columns
+      if len(categorical_cols) > 0:
+          if categorical_strategy == 'mode':
+              for col in categorical_cols:
+                  if processed_data[col].isnull().any():
+                      mode_value = processed_data[col].mode()
+                      if not mode_value.empty:
+                          processed_data[col].fillna(mode_value[0], inplace=True)
+      
+      # 特征缩放
+      if scale_features and len(numeric_cols) > 0:
+          scaler = StandardScaler()
+          processed_data[numeric_cols] = scaler.fit_transform(processed_data[numeric_cols])
+      
+      return processed_data
+      
+  except Exception as e:
+      st.error(f"数据预处理失败: {str(e)}")
+      return data
 
-def generate_sample_data(data_type="classification"):
-    """
-    生成示例数据用于演示
-    """
-    np.random.seed(42)
-    
-    if data_type == "classification":
-        n_samples = 1000
-        # 模拟医学数据：年龄、BMI、血压、血糖等
-        data = {
-            '年龄': np.random.normal(50, 15, n_samples),
-            'BMI': np.random.normal(25, 5, n_samples),
-            '收缩压': np.random.normal(120, 20, n_samples),
-            '舒张压': np.random.normal(80, 10, n_samples),
-            '血糖': np.random.normal(5.5, 1.5, n_samples),
-            '胆固醇': np.random.normal(200, 50, n_samples),
-            '性别': np.random.choice(['男', '女'], n_samples),
-            '吸烟': np.random.choice(['是', '否'], n_samples, p=[0.3, 0.7])
-        }
-        
-        # 创建目标变量（疾病风险）
-        risk_score = (data['年龄'] * 0.02 + data['BMI'] * 0.1 + 
-                     data['收缩压'] * 0.01 + data['血糖'] * 0.3 + 
-                     np.random.normal(0, 2, n_samples))
-        data['疾病风险'] = ['高风险' if score > 8 else '低风险' for score in risk_score]
-        
-    elif data_type == "regression":
-        n_samples = 1000
-        data = {
-            '年龄': np.random.normal(45, 12, n_samples),
-            '教育年限': np.random.normal(12, 4, n_samples),
-            '工作经验': np.random.normal(15, 8, n_samples),
-            '城市规模': np.random.choice([1, 2, 3, 4], n_samples),
-            '行业类型': np.random.choice(['IT', '金融', '医疗', '教育', '制造'], n_samples)
-        }
-        
-        # 创建目标变量（收入）
-        data['年收入'] = (data['年龄'] * 800 + data['教育年限'] * 2000 + 
-                       data['工作经验'] * 1500 + data['城市规模'] * 5000 + 
-                       np.random.normal(0, 10000, n_samples))
-    
-    df = pd.DataFrame(data)
-    return df
+def encode_categorical_variables(data, columns=None, method='label'):
+  """
+  编码分类变量
+  """
+  try:
+      encoded_data = data.copy()
+      
+      if columns is None:
+          columns = encoded_data.select_dtypes(include=['object']).columns
+      
+      if method == 'label':
+          label_encoders = {}
+          for col in columns:
+              if col in encoded_data.columns:
+                  le = LabelEncoder()
+                  encoded_data[col] = le.fit_transform(encoded_data[col].astype(str))
+                  label_encoders[col] = le
+          
+          return encoded_data, label_encoders
+      
+      elif method == 'onehot':
+          encoded_data = pd.get_dummies(encoded_data, columns=columns, prefix=columns)
+          return encoded_data, None
+      
+  except Exception as e:
+      st.error(f"分类变量编码失败: {str(e)}")
+      return data, None
 
-def download_dataframe_as_csv(df, filename="processed_data.csv"):
-    """
-    将DataFrame转换为CSV下载链接
-    """
-    csv = df.to_csv(index=False)
-    return st.download_button(
-        label="下载处理后的数据",
-        data=csv,
-        file_name=filename,
-        mime="text/csv"
-    )
+def detect_outliers(data, columns=None, method='iqr'):
+  """
+  检测异常值
+  """
+  try:
+      if columns is None:
+          columns = data.select_dtypes(include=[np.number]).columns
+      
+      outliers = {}
+      
+      for col in columns:
+          if col in data.columns:
+              if method == 'iqr':
+                  Q1 = data[col].quantile(0.25)
+                  Q3 = data[col].quantile(0.75)
+                  IQR = Q3 - Q1
+                  lower_bound = Q1 - 1.5 * IQR
+                  upper_bound = Q3 + 1.5 * IQR
+                  
+                  outlier_mask = (data[col] < lower_bound) | (data[col] > upper_bound)
+                  outliers[col] = data[outlier_mask].index.tolist()
+              
+              elif method == 'zscore':
+                  z_scores = np.abs((data[col] - data[col].mean()) / data[col].std())
+                  outlier_mask = z_scores > 3
+                  outliers[col] = data[outlier_mask].index.tolist()
+      
+      return outliers
+      
+  except Exception as e:
+      st.error(f"异常值检测失败: {str(e)}")
+      return {}
+
+def remove_outliers(data, outliers_dict):
+  """
+  移除异常值
+  """
+  try:
+      cleaned_data = data.copy()
+      all_outlier_indices = set()
+      
+      for col, indices in outliers_dict.items():
+          all_outlier_indices.update(indices)
+      
+      cleaned_data = cleaned_data.drop(list(all_outlier_indices))
+      cleaned_data = cleaned_data.reset_index(drop=True)
+      
+      return cleaned_data
+      
+  except Exception as e:
+      st.error(f"异常值移除失败: {str(e)}")
+      return data
+
+def split_features_target(data, target_column):
+  """
+  分离特征和目标变量
+  """
+  try:
+      if target_column not in data.columns:
+          raise ValueError(f"目标列 '{target_column}' 不存在")
+      
+      X = data.drop(columns=[target_column])
+      y = data[target_column]
+      
+      return X, y
+      
+  except Exception as e:
+      st.error(f"特征目标分离失败: {str(e)}")
+      return None, None
+
+# 为了向后兼容，添加一些常用的别名
+def clean_data(data, **kwargs):
+  """清理数据的别名函数"""
+  return preprocess_data(data, **kwargs)
+
+def get_summary_statistics(data):
+  """获取汇总统计信息"""
+  try:
+      numeric_data = data.select_dtypes(include=[np.number])
+      if len(numeric_data.columns) > 0:
+          return numeric_data.describe()
+      else:
+          return pd.DataFrame()
+  except Exception as e:
+      st.error(f"获取统计信息失败: {str(e)}")
+      return pd.DataFrame()
