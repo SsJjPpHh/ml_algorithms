@@ -1,30 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-数据处理工具模块
+ML算法模块的数据处理工具
 """
 
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 import streamlit as st
-
-def load_data(file_path):
-  """
-  加载数据文件
-  支持CSV和Excel格式
-  """
-  try:
-      if file_path.name.endswith('.csv'):
-          data = pd.read_csv(file_path)
-      elif file_path.name.endswith(('.xlsx', '.xls')):
-          data = pd.read_excel(file_path)
-      else:
-          raise ValueError("不支持的文件格式")
-      
-      return data
-  except Exception as e:
-      st.error(f"数据加载失败: {str(e)}")
-      return None
 
 def handle_missing_values(data, strategy='mean'):
   """
@@ -64,28 +46,32 @@ def handle_missing_values(data, strategy='mean'):
       st.error(f"缺失值处理失败: {str(e)}")
       return data
 
-def get_data_info(data):
-  """
-  获取数据基本信息
-  """
+def load_data(file_path):
+  """加载数据文件"""
   try:
-      info = {
-          'shape': data.shape,
-          'columns': list(data.columns),
-          'dtypes': data.dtypes.to_dict(),
-          'missing_values': data.isnull().sum().to_dict(),
-          'numeric_columns': list(data.select_dtypes(include=[np.number]).columns),
-          'categorical_columns': list(data.select_dtypes(include=['object']).columns)
-      }
-      return info
+      if hasattr(file_path, 'name'):
+          if file_path.name.endswith('.csv'):
+              data = pd.read_csv(file_path)
+          elif file_path.name.endswith(('.xlsx', '.xls')):
+              data = pd.read_excel(file_path)
+          else:
+              raise ValueError("不支持的文件格式")
+      else:
+          # 处理字符串路径
+          if file_path.endswith('.csv'):
+              data = pd.read_csv(file_path)
+          elif file_path.endswith(('.xlsx', '.xls')):
+              data = pd.read_excel(file_path)
+          else:
+              raise ValueError("不支持的文件格式")
+      
+      return data
   except Exception as e:
-      st.error(f"获取数据信息失败: {str(e)}")
+      st.error(f"数据加载失败: {str(e)}")
       return None
 
 def preprocess_data(data, numeric_strategy='mean', categorical_strategy='mode', scale_features=False):
-  """
-  数据预处理
-  """
+  """数据预处理"""
   try:
       processed_data = data.copy()
       
@@ -118,10 +104,24 @@ def preprocess_data(data, numeric_strategy='mean', categorical_strategy='mode', 
       st.error(f"数据预处理失败: {str(e)}")
       return data
 
+def get_data_info(data):
+  """获取数据基本信息"""
+  try:
+      info = {
+          'shape': data.shape,
+          'columns': list(data.columns),
+          'dtypes': data.dtypes.to_dict(),
+          'missing_values': data.isnull().sum().to_dict(),
+          'numeric_columns': list(data.select_dtypes(include=[np.number]).columns),
+          'categorical_columns': list(data.select_dtypes(include=['object']).columns)
+      }
+      return info
+  except Exception as e:
+      st.error(f"获取数据信息失败: {str(e)}")
+      return None
+
 def encode_categorical_variables(data, columns=None, method='label'):
-  """
-  编码分类变量
-  """
+  """编码分类变量"""
   try:
       encoded_data = data.copy()
       
@@ -146,10 +146,24 @@ def encode_categorical_variables(data, columns=None, method='label'):
       st.error(f"分类变量编码失败: {str(e)}")
       return data, None
 
+def split_features_target(data, target_column):
+  """分离特征和目标变量"""
+  try:
+      if target_column not in data.columns:
+          raise ValueError(f"目标列 '{target_column}' 不存在")
+      
+      X = data.drop(columns=[target_column])
+      y = data[target_column]
+      
+      return X, y
+      
+  except Exception as e:
+      st.error(f"特征目标分离失败: {str(e)}")
+      return None, None
+
+# 添加其他可能需要的函数
 def detect_outliers(data, columns=None, method='iqr'):
-  """
-  检测异常值
-  """
+  """检测异常值"""
   try:
       if columns is None:
           columns = data.select_dtypes(include=[np.number]).columns
@@ -180,9 +194,7 @@ def detect_outliers(data, columns=None, method='iqr'):
       return {}
 
 def remove_outliers(data, outliers_dict):
-  """
-  移除异常值
-  """
+  """移除异常值"""
   try:
       cleaned_data = data.copy()
       all_outlier_indices = set()
@@ -198,37 +210,3 @@ def remove_outliers(data, outliers_dict):
   except Exception as e:
       st.error(f"异常值移除失败: {str(e)}")
       return data
-
-def split_features_target(data, target_column):
-  """
-  分离特征和目标变量
-  """
-  try:
-      if target_column not in data.columns:
-          raise ValueError(f"目标列 '{target_column}' 不存在")
-      
-      X = data.drop(columns=[target_column])
-      y = data[target_column]
-      
-      return X, y
-      
-  except Exception as e:
-      st.error(f"特征目标分离失败: {str(e)}")
-      return None, None
-
-# 为了向后兼容，添加一些常用的别名
-def clean_data(data, **kwargs):
-  """清理数据的别名函数"""
-  return preprocess_data(data, **kwargs)
-
-def get_summary_statistics(data):
-  """获取汇总统计信息"""
-  try:
-      numeric_data = data.select_dtypes(include=[np.number])
-      if len(numeric_data.columns) > 0:
-          return numeric_data.describe()
-      else:
-          return pd.DataFrame()
-  except Exception as e:
-      st.error(f"获取统计信息失败: {str(e)}")
-      return pd.DataFrame()
